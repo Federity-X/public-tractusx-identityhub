@@ -1,0 +1,103 @@
+#
+# Tractus-X Issuer Service — Central Dataspace Authority
+#
+# This stack provides the central credential issuance service for the dataspace.
+# Each company's IdentityHub (wallet) runs in the company's own stack
+# (see tractusx-edc/deployment/local/docker-compose.yaml).
+#
+# Prerequisites:
+#   1. Build shadow JARs: ./gradlew :runtimes:identityhub:shadowJar :runtimes:issuerservice:shadowJar
+#   2. Build IH image (used by per-company wallets in EDC stack):
+#        docker build -t identityhub:local runtimes/identityhub/
+#   3. Create external network: docker network create edc-net
+#
+# Usage:
+#   cd deployment/local
+#   docker compose up --build -d
+#
+# The external network "edc-net" allows all components to communicate.
+#
+
+services:
+
+  # ==========================================================================
+  # Issuer PostgreSQL — Issuer Service database only
+  # ==========================================================================
+  issuer-postgres:
+    image: postgres:16-alpine
+    container_name: issuer-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: issuerservice
+    ports:
+      - "5432:5432"
+    volumes:
+      - issuer-postgres-data:/var/lib/postgresql/data
+      - ./config/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - edc-net
+
+  # ==========================================================================
+  # Issuer Vault — Issuer Service secrets only
+  # ==========================================================================
+  issuer-vault:
+    image: hashicorp/vault:1.15
+    container_name: issuer-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - edc-net
+
+  # ==========================================================================
+  # Issuer Service — Central credential issuance authority
+  # ==========================================================================
+  issuerservice:
+    build:
+      context: ../../runtimes/issuerservice
+      dockerfile: Dockerfile
+    container_name: issuerservice
+    depends_on:
+      issuer-postgres:
+        condition: service_healthy
+      issuer-vault:
+        condition: service_healthy
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+    ports:
+      - "18181:8181"    # default / web.http
+      - "18292:9292"    # STS
+      - "13132:13132"   # issuance
+      - "18100:80"      # DID (container port 80 for did:web resolution)
+      - "15152:15152"   # issuer admin
+      - "17171:7171"    # version
+      - "19999:9999"    # statuslist
+      - "5006:5005"     # JVM debug
+    volumes:
+      - ./config/issuerservice.properties:/app/configuration.properties:ro
+      - ./config/logging.properties:/app/logging.properties:ro
+    networks:
+      - edc-net
+
+volumes:
+  issuer-postgres-data:
+
+networks:
+  edc-net:
+    external: true
