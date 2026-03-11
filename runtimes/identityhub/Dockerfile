@@ -45,8 +45,9 @@ RUN mkdir /app/logs
 USER "$APP_USER"
 
 COPY ${JAR} identityhub.jar
-COPY ${OTEL_JAR} opentelemetry-javaagent.jar
-COPY ${ADDITIONAL_FILES} ./
+# OTEL and additional files not used in local dev
+# COPY ${OTEL_JAR} opentelemetry-javaagent.jar
+# COPY ${ADDITIONAL_FILES} ./
 
 HEALTHCHECK NONE
 
