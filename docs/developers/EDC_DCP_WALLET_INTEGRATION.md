@@ -4,6 +4,13 @@
 **Date**: March 2026
 **Audience**: EDC connector operators and developers
 
+### Repository References
+
+| Repository | Branch | URL |
+|------------|--------|-----|
+| **IdentityHub** (this repo) | `dcp-flow-local-deployment-with-upstream-0.15.1` | [Federity-X/public-tractusx-identityhub](https://github.com/Federity-X/public-tractusx-identityhub/tree/dcp-flow-local-deployment-with-upstream-0.15.1) |
+| **Tractus-X EDC** | `dcp` | [Federity-X/public-tractusx-edc](https://github.com/Federity-X/public-tractusx-edc/tree/dcp) |
+
 ---
 
 ## Table of Contents
@@ -79,6 +86,55 @@ The companion **IssuerService** handles credential issuance, revocation, and sta
 ### Component Map
 
 Each company deploys its own IdentityHub stack. A shared IssuerService handles credential issuance.
+
+```mermaid
+graph TB
+    subgraph "Issuer Stack (from this repo)"
+        issuer-vault["issuer-vault :8200"]
+        issuer-postgres["issuer-postgres :5432"]
+        issuerservice["issuerservice<br/>(Issuer IdentityHub)"]
+        issuerservice --> issuer-vault
+        issuerservice --> issuer-postgres
+    end
+
+    subgraph "Provider Company"
+        provider-vault["provider-vault :8201"]
+        provider-postgres["provider-postgres :6432"]
+        provider-ih["provider-ih<br/>(Provider Wallet)"]
+        provider-cp["provider-cp<br/>(Control Plane)"]
+        provider-dp["provider-dp<br/>(Data Plane)"]
+        provider-ih --> provider-vault
+        provider-ih --> provider-postgres
+        provider-cp --> provider-ih
+        provider-cp --> provider-vault
+        provider-dp --> provider-cp
+    end
+
+    subgraph "Consumer Company"
+        consumer-vault["consumer-vault :8202"]
+        consumer-postgres["consumer-postgres :6433"]
+        consumer-ih["consumer-ih<br/>(Consumer Wallet)"]
+        consumer-cp["consumer-cp<br/>(Control Plane)"]
+        consumer-dp["consumer-dp<br/>(Data Plane)"]
+        consumer-ih --> consumer-vault
+        consumer-ih --> consumer-postgres
+        consumer-cp --> consumer-ih
+        consumer-cp --> consumer-vault
+        consumer-dp --> consumer-cp
+    end
+
+    subgraph "Central"
+        bdrs["bdrs-server :8580/:8581"]
+    end
+
+    issuerservice -- "Issues VCs" --> provider-ih
+    issuerservice -- "Issues VCs" --> consumer-ih
+    consumer-cp -- "DSP Protocol" --> provider-cp
+    provider-cp -- "DID resolve" --> consumer-ih
+    consumer-cp -- "DID resolve" --> provider-ih
+    consumer-cp -- "BPN↔DID" --> bdrs
+    provider-cp -- "BPN↔DID" --> bdrs
+```
 
 | Component | Provider Stack | Consumer Stack | Shared |
 |-----------|---------------|----------------|--------|
@@ -539,6 +595,25 @@ The JWT is an SI token obtained from the STS. The IdentityHub:
 
 ### 8.1 Connector Authentication (DSP Protocol)
 
+```mermaid
+sequenceDiagram
+    participant PC as Provider Connector
+    participant PIH as Provider IH (Wallet)
+    participant CC as Consumer Connector
+    participant CIH as Consumer IH (Wallet)
+
+    PC->>PIH: POST /api/sts/token<br/>(client_id=provider DID,<br/>client_secret, audience=consumer DID)
+    PIH-->>PC: { access_token: SI JWT }
+
+    PC->>CC: DSP Request<br/>Authorization: Bearer <SI JWT>
+    CC->>PIH: Resolve Provider DID Document<br/>GET /.well-known/did.json
+    PIH-->>CC: DID Document (with public key)
+    Note over CC: Verify JWT signature<br/>with DID public key
+    CC-->>PC: DSP Response
+```
+
+<details><summary>ASCII version</summary>
+
 ```
 ┌──────────┐                        ┌──────────────┐                       ┌──────────┐
 │ Provider  │                        │  Provider    │                       │ Consumer │
@@ -572,6 +647,7 @@ The JWT is an SI token obtained from the STS. The IdentityHub:
       │ 7. DSP Response                     │                                    │
       │◀────────────────────────────────────┼────────────────────────────────────│
 ```
+</details>
 
 ### 8.2 Credential Presentation (DCP Presentation Query)
 

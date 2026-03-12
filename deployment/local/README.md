@@ -2,10 +2,68 @@
 
 This directory provides a Docker Compose stack for the **IssuerService** — the shared
 credential issuance authority in a Tractus-X dataspace. It is used alongside the
-[tractusx-edc](https://github.com/eclipse-tractusx/tractusx-edc) local deployment,
+[tractusx-edc](https://github.com/Federity-X/public-tractusx-edc/tree/dcp) local deployment,
 which manages per-company IdentityHub (wallet) instances.
 
 ## Architecture Overview
+
+The IssuerService acts as the trusted credential authority in the dataspace,
+issuing Verifiable Credentials to each company's IdentityHub wallet.
+
+```mermaid
+graph TB
+    subgraph "This Repo's Compose (Issuer Stack)"
+        issuer-vault["issuer-vault<br/>HashiCorp Vault<br/>:8200"]
+        issuer-postgres["issuer-postgres<br/>PostgreSQL 16<br/>:5432"]
+        issuerservice["issuerservice<br/>IdentityHub (Issuer)<br/>:18181 Identity API<br/>:18292 STS<br/>:15152 Admin<br/>:13132 Issuance<br/>:19999 Status List"]
+        issuerservice --> issuer-vault
+        issuerservice --> issuer-postgres
+    end
+
+    subgraph "tractusx-edc Compose (per-company)"
+        provider-ih["provider-ih<br/>(Provider Wallet)"]
+        consumer-ih["consumer-ih<br/>(Consumer Wallet)"]
+        provider-cp["provider-cp / provider-dp"]
+        consumer-cp["consumer-cp / consumer-dp"]
+        bdrs["bdrs-server"]
+    end
+
+    issuerservice -- "Issues MembershipCredential,<br/>BpnCredential,<br/>DataExchangeGovernanceCredential" --> provider-ih
+    issuerservice -- "Issues MembershipCredential,<br/>BpnCredential,<br/>DataExchangeGovernanceCredential" --> consumer-ih
+    provider-cp -- "DCP auth<br/>(SI Token, VP)" --> provider-ih
+    consumer-cp -- "DCP auth<br/>(SI Token, VP)" --> consumer-ih
+```
+
+### Credential Issuance Flow
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as bootstrap.sh
+    participant IS as IssuerService
+    participant PIH as Provider IH (Wallet)
+    participant CIH as Consumer IH (Wallet)
+
+    Note over Bootstrap: Step 1 — Create holders
+    Bootstrap->>IS: POST /api/issueradmin/participants<br/>(provider DID + BPN)
+    Bootstrap->>IS: POST /api/issueradmin/participants<br/>(consumer DID + BPN)
+
+    Note over Bootstrap: Step 2 — Configure credential definitions
+    Bootstrap->>IS: POST /api/issueradmin/credentials/definitions<br/>(MembershipCredential, BpnCredential, etc.)
+
+    Note over Bootstrap: Step 3 — Create attestations
+    Bootstrap->>IS: POST /api/issueradmin/credentials/attestations<br/>(link holders to credential types)
+
+    Note over Bootstrap: Step 4 — Issue credentials
+    Bootstrap->>IS: POST /api/issueradmin/credentials/{holderId}/issue
+    IS->>PIH: DCP Issuance Protocol<br/>(VC signed by issuer key)
+    PIH-->>IS: Credential stored
+
+    Bootstrap->>IS: POST /api/issueradmin/credentials/{holderId}/issue
+    IS->>CIH: DCP Issuance Protocol<br/>(VC signed by issuer key)
+    CIH-->>IS: Credential stored
+```
+
+### ASCII Overview
 
 ```
 ┌─────────────────── This Repo's Compose ───────────────────┐
@@ -32,7 +90,7 @@ which manages per-company IdentityHub (wallet) instances.
 
 **Key boundary**: This compose deploys _only_ the IssuerService stack.
 Each company's IdentityHub wallet, Vault, and PostgreSQL are deployed by the
-EDC's `deployment/local/docker-compose.yaml`.
+[EDC's `deployment/local/docker-compose.yaml`](https://github.com/Federity-X/public-tractusx-edc/tree/dcp/deployment/local).
 
 ## Prerequisites
 
@@ -144,3 +202,5 @@ doesn't supply OTEL JARs, and the commented lines avoid a build failure. The PR 
 - [EDC DCP Wallet Integration Guide](../../docs/developers/EDC_DCP_WALLET_INTEGRATION.md) — full guide for EDC teams
 - [EDC 0.15.1 Upgrade Fixes](../../docs/admin/EDC_0.15.1_UPGRADE_FIXES.md) — all 14 fixes applied during the upgrade
 - [Migration Guide](../../docs/admin/migration-guide.md) — step-by-step upgrade from EDC 0.14.0
+- [EDC Local Deployment README](https://github.com/Federity-X/public-tractusx-edc/tree/dcp/deployment/local) — the per-company EDC + IdentityHub stack
+- [EDC Issues & Fixes](https://github.com/Federity-X/public-tractusx-edc/tree/dcp/docs/development/local-dcp-issues-and-fixes.md) — 14-issue troubleshooting catalog

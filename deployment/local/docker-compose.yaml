@@ -3,7 +3,7 @@
 #
 # This stack provides the central credential issuance service for the dataspace.
 # Each company's IdentityHub (wallet) runs in the company's own stack
-# (see tractusx-edc/deployment/local/docker-compose.yaml).
+# (see https://github.com/Federity-X/public-tractusx-edc/tree/dcp/deployment/local).
 #
 # Prerequisites:
 #   1. Build shadow JARs: ./gradlew :runtimes:identityhub:shadowJar :runtimes:issuerservice:shadowJar
