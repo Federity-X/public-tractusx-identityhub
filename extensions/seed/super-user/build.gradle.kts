@@ -1,5 +1,6 @@
 /*
  *   Copyright (c) 2025 LKS Next
+ *   Copyright (c) 2026 Technovative Solutions
  *   Copyright (c) 2025 Contributors to the Eclipse Foundation
  *
  *   See the NOTICE file(s) distributed with this work for additional
@@ -26,7 +27,6 @@ plugins {
 
 dependencies {
     implementation(libs.edc.ih.spi)
-    implementation(libs.edc.ih.participant.context.config.spi)
 
     testImplementation(libs.edc.junit)
 }
