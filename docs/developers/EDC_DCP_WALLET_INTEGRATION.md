@@ -251,15 +251,32 @@ curl -s http://localhost:18181/api/check/health | jq .
 
 ### Configuration Files
 
+Configuration is split across **two repositories**:
+
+**In `tractusx-edc` repo** (`deployment/local/config/`):
+
 | File | Purpose |
 |------|---------|
-| `deployment/local/config/provider-ih.properties` | Provider IdentityHub runtime config |
-| `deployment/local/config/consumer-ih.properties` | Consumer IdentityHub runtime config |
-| `deployment/local/config/provider-cp.properties` | Provider EDC control plane config |
-| `deployment/local/config/consumer-cp.properties` | Consumer EDC control plane config |
-| `deployment/local/config/provider-dp.properties` | Provider EDC data plane config |
-| `deployment/local/config/consumer-dp.properties` | Consumer EDC data plane config |
-| `deployment/local/docker-compose.yaml` | Full stack definition |
+| `provider-ih.properties` | Provider IdentityHub runtime config |
+| `consumer-ih.properties` | Consumer IdentityHub runtime config |
+| `provider-cp.properties` | Provider EDC control plane config |
+| `consumer-cp.properties` | Consumer EDC control plane config |
+| `provider-dp.properties` | Provider EDC data plane config |
+| `consumer-dp.properties` | Consumer EDC data plane config |
+| `docker-compose.yaml` | Full 14-container stack definition |
+
+**In `tractusx-identityhub` repo** (this repo, `deployment/local/config/`):
+
+| File | Purpose |
+|------|---------|
+| `identityhub.properties` | Reference IdentityHub config (template for provider/consumer-ih) |
+| `issuerservice.properties` | IssuerService runtime config |
+| `docker-compose.yaml` | Issuer-only stack (3 containers: issuerservice, issuer-postgres, issuer-vault) |
+
+> **Tip**: When setting up `provider-ih.properties` and `consumer-ih.properties` in the EDC repo,
+> use `deployment/local/config/identityhub.properties` from this repo as a template.
+> See [Section 6 — IdentityHub Runtime Properties](#6-edc-connector-configuration) for the
+> required datasource entries.
 
 ---
 
@@ -457,6 +474,70 @@ edc.transfer.proxy.token.signer.privatekey.alias=provider-transfer-proxy-key
 edc.transfer.proxy.token.verifier.publickey.alias=provider-transfer-proxy-key
 ```
 
+#### IdentityHub Runtime Properties (provider-ih example)
+
+The IdentityHub itself needs a properties file with **datasource** and **store mapping** entries.
+These go in `provider-ih.properties` / `consumer-ih.properties` (in the EDC repo's `deployment/local/config/`).
+
+> **Critical since EDC 0.15.1**: The `participantcontextconfig` datasource is **mandatory**.
+> Without it, the IdentityHub will fail to persist participant context configurations and
+> you'll get `"No configuration found for participant context"` errors after container restarts.
+
+```properties
+###############################################################################
+# IdentityHub Runtime — Datasource Configuration (provider-ih example)
+###############################################################################
+
+# --- PostgreSQL Datasources ---
+# Each SQL store subsystem requires its own datasource entry.
+# All can share the same database connection via the "default" alias.
+
+edc.datasource.default.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.default.user=postgres
+edc.datasource.default.password=postgres
+
+edc.datasource.accesstokendata.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.accesstokendata.user=postgres
+edc.datasource.accesstokendata.password=postgres
+
+edc.datasource.credentials.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.credentials.user=postgres
+edc.datasource.credentials.password=postgres
+
+edc.datasource.did.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.did.user=postgres
+edc.datasource.did.password=postgres
+
+edc.datasource.keypair.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.keypair.user=postgres
+edc.datasource.keypair.password=postgres
+
+edc.datasource.participantcontext.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.participantcontext.user=postgres
+edc.datasource.participantcontext.password=postgres
+
+# NEW in EDC 0.15.1 — required for participant context config persistence
+edc.datasource.participantcontextconfig.url=jdbc:postgresql://provider-postgres:5432/identityhub
+edc.datasource.participantcontextconfig.user=postgres
+edc.datasource.participantcontextconfig.password=postgres
+
+# --- Store Mappings ---
+# Map each store subsystem to a datasource alias.
+edc.sql.store.accesstokendata.datasource=default
+edc.sql.store.credentials.datasource=default
+edc.sql.store.did.datasource=default
+edc.sql.store.keypair.datasource=default
+edc.sql.store.participantcontext.datasource=default
+edc.sql.store.participantcontextconfig.datasource=default
+```
+
+> **Required datasources** (all seven must be present):
+> `default`, `accesstokendata`, `credentials`, `did`, `keypair`, `participantcontext`, `participantcontextconfig`
+>
+> For the IssuerService, additional datasources are needed: `attestation`, `credentialdefinitions`,
+> `issuanceprocess`, `participantcontextconfig`. See `deployment/local/config/issuerservice.properties`
+> in this repo for the full reference.
+
 ### Configuration Pitfalls
 
 | Property | Wrong | Right | Consequence |
@@ -465,6 +546,7 @@ edc.transfer.proxy.token.verifier.publickey.alias=provider-transfer-proxy-key
 | `edc.hostname` (DP) | *(omitted)* | `provider-dp` | DP registers with wrong URL — transfers fail |
 | `edc.iam.trusted-issuer...supportedtypes` | `["MembershipCredential","BpnCredential"]` | Include `DataExchangeGovernanceCredential` | Policy evaluation can't find required VC |
 | Transfer proxy key | Raw hex string | EC P-256 JWK JSON | EDR tokens are invalid — data pull fails |
+| `participantcontextconfig` datasource | *(omitted)* | All 3 entries (url, user, password) + store mapping | IH loses config on restart — HTTP 500 |
 
 ### Vault Configuration
 
@@ -1165,9 +1247,16 @@ edc.hostname=provider-dp
 
 #### 9. HTTP 500 "No configuration found for participant context"
 
-**Cause**: The in-memory `ParticipantContextConfigStore` lost its entries after a container restart.
+**Cause**: The `ParticipantContextConfigStore` has no entries — either its datasource is not configured
+or the Flyway migration didn't run.
 
-**Fix**: This is handled automatically by the `SuperUserSeedExtension` which restores all participant configs on startup. If you see this error, check that the seed extension is loaded (look for `SuperUserSeedExtension` in startup logs).
+**Fix**: This issue has been permanently resolved by the upstream `participantcontext-config-store-sql`
+module, which persists config entries in PostgreSQL. Ensure the `participantcontextconfig` datasource
+is configured in your properties file (see [Section 6 — IdentityHub Runtime Properties](#6-edc-connector-configuration)).
+If you still see this error, check that:
+1. All three datasource entries exist: `edc.datasource.participantcontextconfig.url/user/password`
+2. The store mapping exists: `edc.sql.store.participantcontextconfig.datasource=default`
+3. The Flyway migration created the `edc_participant_context_config` table (check startup logs for `flyway_schema_history_participantcontextconfig`)
 
 #### 10. DID resolution returns 204 (empty) in local dev
 
@@ -1181,7 +1270,7 @@ edc.hostname=provider-dp
 
 **Fix**: The API key format is `base64(<participantContextId>).<randomToken>`. The super-user key is `c3VwZXItdXNlcg==.superuserkey`. For other participants, use the key from the `createParticipant` response.
 
-#### 7. Connector can't reach IdentityHub
+#### 12. Connector can't reach IdentityHub
 
 **Cause**: Not on the same Docker network.
 
@@ -1274,6 +1363,10 @@ docker logs issuerservice 2>&1 | tail -100
 │  EDC Data Plane Properties (CRITICAL):                          │
 │    edc.hostname=provider-dp  (Docker container name!)           │
 │    Transfer proxy key = EC P-256 JWK JSON in Vault              │
+│                                                                 │
+│  IH Datasources (ALL required in provider/consumer-ih.props):   │
+│    default, accesstokendata, credentials, did, keypair,         │
+│    participantcontext, participantcontextconfig (NEW in 0.15.1) │
 │                                                                 │
 │  Contract Negotiation (CRITICAL):                               │
 │    odrl:assigner = Provider BPN (not DID!)                      │

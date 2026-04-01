@@ -224,6 +224,11 @@ CREATE TABLE IF NOT EXISTS edc_lease (
 
 ## Fix 8: `ParticipantContextConfig` Persistence — Super-User (Critical)
 
+> **UPDATE (March 2026)**: This workaround has been superseded by the upstream
+> `participantcontext-config-store-sql` module, which provides a persistent
+> PostgreSQL-backed `ParticipantContextConfigStore`. The `ensureConfigExists()`
+> method has been removed from `SuperUserSeedExtension`.
+
 **Severity**: CRITICAL — All authenticated API calls return HTTP 500 after container restart
 **Root Cause**: EDC 0.15.1 introduced a new `ParticipantContextConfigStore` for per-participant vault configuration. However, only an **in-memory implementation** exists (no SQL store). On container restart, all config entries are lost while participant contexts persist in PostgreSQL. This causes:
 
@@ -242,6 +247,11 @@ Any API call that touches the vault (authentication, token regeneration, deletio
 ---
 
 ## Fix 9: `ParticipantContextConfig` Persistence — All Participants (Critical)
+
+> **UPDATE (March 2026)**: This workaround has been superseded by the upstream
+> `participantcontext-config-store-sql` module, which provides a persistent
+> PostgreSQL-backed `ParticipantContextConfigStore`. The `restoreAllParticipantConfigs()`
+> method has been removed from `SuperUserSeedExtension`.
 
 **Severity**: CRITICAL — Same as Fix 8, but for ALL non-super-user participants
 **Root Cause**: Fix 8 only restored the config for the super-user. All other participants (e.g., "provider", "consumer" created via the API) still lost their config entries on restart, causing:
@@ -353,6 +363,10 @@ Each group separated by a blank line.
 
 ## Fix 14: `participant-context-config-spi` Dependency
 
+> **UPDATE (March 2026)**: The `participant-context-config-spi` dependency has been
+> removed from `super-user/build.gradle.kts` since the workaround code (Fixes 8/9)
+> was removed. The dependency is still used by `initial-participant/build.gradle.kts`.
+
 **Severity**: HIGH — Compilation fails
 **Root Cause**: The `ParticipantContextConfigService` and `ParticipantContextConfiguration` classes used in Fixes 8/9/10 are in a new SPI module that didn't exist in EDC 0.14.0 and was not yet referenced by the seed extension.
 
@@ -415,7 +429,7 @@ The test covers:
 | `runtimes/issuerservice/build.gradle.kts` | `mergeServiceFiles()` |
 | `runtimes/issuerservice-memory/build.gradle.kts` | `mergeServiceFiles()` |
 | `extensions/seed/super-user/build.gradle.kts` | New config SPI dependency |
-| `extensions/seed/super-user/.../SuperUserSeedExtension.java` | `participantContextId()`, `ensureConfigExists()`, `ensureApiKeyInVault()`, `restoreAllParticipantConfigs()` |
+| `extensions/seed/super-user/.../SuperUserSeedExtension.java` | `participantContextId()`, `ensureApiKeyInVault()` (previously also `ensureConfigExists()`, `restoreAllParticipantConfigs()` — removed, see Fixes 8/9 updates) |
 | `extensions/store/sql/migrations/.../credentials/V0_0_2__Add_Usage_Column.sql` | New migration |
 | `extensions/store/sql/migrations/.../keypair/V0_0_2__Add_Usage_Column.sql` | New migration |
 | `extensions/store/sql/migrations/.../stsclient/V0_0_2__Update_Schema_For_EDC_0_15_1.sql` | New migration |

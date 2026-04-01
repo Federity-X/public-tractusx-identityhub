@@ -312,6 +312,11 @@ The create participant request body may still reference `participantId` but the 
 
 ### 5.1 CRITICAL: ParticipantContextConfig Persistence (FIXED)
 
+> **UPDATE (March 2026)**: The in-memory workaround (`ensureConfigExists()`,
+> `restoreAllParticipantConfigs()`) has been replaced by the upstream
+> `participantcontext-config-store-sql` module. Config entries are now persisted
+> in PostgreSQL and survive container restarts without any seed extension workaround.
+
 **Problem**: The `ParticipantContextConfigStore` is in-memory only. On container restart, config entries are lost while participants persist in PostgreSQL. This causes `EdcException: No configuration found for participant context <id>` → HTTP 500 on all authenticated API calls.
 
 Additionally, when using HashiCorp Vault in dev mode, the API key is lost on container restart, causing `NullPointerException` in `ServicePrincipal.getCredential()` during authentication.
