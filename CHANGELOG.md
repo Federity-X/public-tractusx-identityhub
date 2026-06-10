@@ -27,6 +27,13 @@ For changes in other Tractus-X components, see the [Eclipse Tractus-X Changelog]
 
 ### Changed
 
+- **BREAKING:** Upgrade EDC and IdentityHub from 0.16.0 to 0.17.0 ([#308](https://github.com/eclipse-tractusx/tractusx-identityhub/issues/308)):
+  - `org.eclipse.edc:monitor-jdk-logger` artifact deleted upstream; runtimes now rely solely on the bundled `colored-jdk-monitor` extension
+  - `edc-build` plugin bumped from 1.1.6 to 1.4.0 — removed direct `groupId` assignment from POM extension (now read-only)
+  - `@Setting` annotation attribute renamed from `value` to `description` across extensions
+  - `ScopeToCriterionTransformer.transform()` → `transformScope()` with return type `Result<List<Criterion>>`
+  - DCP scope alias updated: `org.eclipse.edc.vc.type` → `org.eclipse.dspace.dcp.vc.type` (backward compatible)
+  - No SQL migrations required for IdentityHub / IssuerService tables
 - **BREAKING:** Upgrade EDC and IdentityHub from 0.15.1 to 0.16.0 ([#280](https://github.com/eclipse-tractusx/tractusx-identityhub/issues/280)):
   - `org.eclipse.edc.identityhub.spi.participantcontext.model.ParticipantContext` replaced by `IdentityHubParticipantContext`
   - `org.eclipse.edc.identityhub.spi.participantcontext.ParticipantContextService` replaced by `IdentityHubParticipantContextService`
