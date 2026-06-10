@@ -38,7 +38,6 @@ dependencies {
     // used for custom extensions
     implementation(libs.edc.core.connector)
     implementation(libs.edc.ih.spi)
-    implementation(libs.edc.jdk.monitor)
     testImplementation(libs.edc.lib.crypto)
     testImplementation(libs.edc.lib.keys)
     testImplementation(libs.edc.junit)

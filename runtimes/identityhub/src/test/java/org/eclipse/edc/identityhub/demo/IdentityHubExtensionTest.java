@@ -28,6 +28,8 @@ import org.eclipse.edc.spi.system.ServiceExtensionContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
@@ -44,7 +46,7 @@ class IdentityHubExtensionTest {
         IdentityHubExtension extension = new IdentityHubExtension();
         extension.initialize(context);
 
-        Result<Criterion> result = extension.createScopeTransformer().transform("org.dataspacex.vc.type:MembershipCredential:read");
+        Result<List<Criterion>> result = extension.createScopeTransformer().transformScope("org.dataspacex.vc.type:MembershipCredential:read");
         assertTrue(result.succeeded());
     }
 

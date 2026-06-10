@@ -25,6 +25,7 @@ import org.eclipse.edc.spi.query.Criterion;
 import org.eclipse.edc.spi.result.Result;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -36,7 +37,7 @@ class TxScopeToCriterionTransformerTest {
     void transform_acceptsConfiguredAlias() {
         ScopeToCriterionTransformer transformer = new TxScopeToCriterionTransformer(Set.of("org.eclipse.tractusx.vc.type", "org.dataspacex.vc.type"));
 
-        Result<Criterion> result = transformer.transform("org.dataspacex.vc.type:MembershipCredential:read");
+        Result<List<Criterion>> result = transformer.transformScope("org.dataspacex.vc.type:MembershipCredential:read");
 
         assertTrue(result.succeeded());
         assertNotNull(result.getContent());
@@ -46,7 +47,7 @@ class TxScopeToCriterionTransformerTest {
     void transform_rejectsUnsupportedAlias() {
         ScopeToCriterionTransformer transformer = new TxScopeToCriterionTransformer();
 
-        Result<Criterion> result = transformer.transform("org.dataspacex.vc.type:MembershipCredential:read");
+        Result<List<Criterion>> result = transformer.transformScope("org.dataspacex.vc.type:MembershipCredential:read");
 
         assertTrue(result.failed());
         assertTrue(result.getFailureDetail().contains(TxScopeToCriterionTransformer.DEFAULT_ALIAS_LITERAL));

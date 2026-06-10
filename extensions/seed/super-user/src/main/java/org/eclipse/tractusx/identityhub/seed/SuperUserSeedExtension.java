@@ -43,10 +43,10 @@ public class SuperUserSeedExtension implements ServiceExtension {
     public static final String NAME = "SUPER USER Seed Extension";
     public static final String DEFAULT_SUPER_USER_PARTICIPANT_ID = "super-user";
 
-    @Setting(value = "Explicitly set the initial API key for the Super-User")
+    @Setting(description = "Explicitly set the initial API key for the Super-User")
     public static final String SUPERUSER_APIKEY_PROPERTY = "edc.ih.api.superuser.key";
 
-    @Setting(value = "Config value to set the super-user's participant ID.", defaultValue = DEFAULT_SUPER_USER_PARTICIPANT_ID)
+    @Setting(description = "Config value to set the super-user's participant ID.", defaultValue = DEFAULT_SUPER_USER_PARTICIPANT_ID)
     public static final String SUPERUSER_PARTICIPANT_ID_PROPERTY = "edc.ih.api.superuser.id";
     private String superUserParticipantId;
     private String superUserApiKey;

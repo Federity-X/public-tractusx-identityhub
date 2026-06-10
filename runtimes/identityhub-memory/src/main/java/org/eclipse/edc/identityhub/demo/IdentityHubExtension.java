@@ -42,7 +42,7 @@ public class IdentityHubExtension implements ServiceExtension {
 
     @Setting(
             key = "tx.identityhub.scope.aliases",
-            value = "Comma-separated list of accepted credential scope aliases for presentation queries.",
+            description = "Comma-separated list of accepted credential scope aliases for presentation queries.",
             defaultValue = TxScopeToCriterionTransformer.DEFAULT_ALIAS_LITERAL
     )
     public static final String TX_SCOPE_ALIASES = "tx.identityhub.scope.aliases";
