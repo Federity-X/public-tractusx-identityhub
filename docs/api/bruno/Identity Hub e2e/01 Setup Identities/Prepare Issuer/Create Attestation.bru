@@ -26,8 +26,6 @@ body:json {
 }
 
 script:pre-request {
-  const btoa = require("btoa");
-  const iss_id = bru.getEnvVar("ISS_ID");
   req.setHeader("x-api-key", bru.getEnvVar("ISSUER_APIKEY"));
 }
 

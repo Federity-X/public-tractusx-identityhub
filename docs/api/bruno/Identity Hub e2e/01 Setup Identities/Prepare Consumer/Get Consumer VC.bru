@@ -15,8 +15,6 @@ headers {
 }
 
 script:pre-request {
-  const btoa = require("btoa");
-  const cons_id = bru.getEnvVar("PROV_ID");
   
   req.setHeader("x-api-key", bru.getEnvVar("CONSUMER_IH_APIKEY"));
 }
