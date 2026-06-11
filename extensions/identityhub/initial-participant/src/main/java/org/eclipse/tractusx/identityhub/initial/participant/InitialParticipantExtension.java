@@ -216,7 +216,6 @@ public class InitialParticipantExtension implements ServiceExtension {
 
     private String getServiceEndpoint() {
         StringBuilder endpointBuilder = new StringBuilder();
-        Base64.Encoder enc = Base64.getEncoder();
         if (useHttpsScheme) {
             endpointBuilder.append("https");
         } else {
@@ -226,7 +225,10 @@ public class InitialParticipantExtension implements ServiceExtension {
         endpointBuilder.append("://");
         endpointBuilder.append(participantId.split(":")[2]);
         endpointBuilder.append(credentialsApi);
-        endpointBuilder.append("/v1/participants/%s".formatted(enc.encodeToString(participantId.getBytes(StandardCharsets.UTF_8))));
+        // EDC 0.17.0 (IH #937): the credentials/presentation API no longer base64-decodes the
+        // participantContextId path segment, so the CredentialService endpoint must carry the
+        // plain participantContextId (here the did:web value, a single colon-delimited segment).
+        endpointBuilder.append("/v1/participants/%s".formatted(participantId));
         return endpointBuilder.toString();
     }
 
