@@ -44,6 +44,10 @@ public class TxScopeToCriterionTransformer implements ScopeToCriterionTransforme
 
     public static final String TYPE_OPERAND = "verifiableCredential.credential.type";
     public static final String DEFAULT_ALIAS_LITERAL = "org.eclipse.tractusx.vc.type";
+    // EDC 0.17.0 replaced the upstream DCP scope alias org.eclipse.edc.vc.type with this one.
+    // Accepted by default alongside the Tractus-X alias so external 0.17.0 connectors interoperate.
+    public static final String DCP_ALIAS_LITERAL = "org.eclipse.dspace.dcp.vc.type";
+    public static final String DEFAULT_ALIASES = DEFAULT_ALIAS_LITERAL + "," + DCP_ALIAS_LITERAL;
     public static final String ALIAS_LITERAL = DEFAULT_ALIAS_LITERAL;
     public static final String CONTAINS_OPERATOR = "contains";
     private static final String SCOPE_SEPARATOR = ":";
@@ -52,7 +56,7 @@ public class TxScopeToCriterionTransformer implements ScopeToCriterionTransforme
     private final List<String> allowedOperations = List.of("read", "*", "all");
 
     public TxScopeToCriterionTransformer() {
-        this(Set.of(DEFAULT_ALIAS_LITERAL));
+        this(Set.of(DEFAULT_ALIAS_LITERAL, DCP_ALIAS_LITERAL));
     }
 
     public TxScopeToCriterionTransformer(Set<String> allowedAliases) {

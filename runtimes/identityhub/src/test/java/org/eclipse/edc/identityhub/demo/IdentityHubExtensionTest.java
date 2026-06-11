@@ -41,7 +41,7 @@ class IdentityHubExtensionTest {
 
     @Test
     void initialize_usesConfiguredAliases(ServiceExtensionContext context) {
-        when(context.getSetting(eq(IdentityHubExtension.TX_SCOPE_ALIASES), eq(TxScopeToCriterionTransformer.DEFAULT_ALIAS_LITERAL)))
+        when(context.getSetting(eq(IdentityHubExtension.TX_SCOPE_ALIASES), eq(TxScopeToCriterionTransformer.DEFAULT_ALIASES)))
                 .thenReturn("org.eclipse.tractusx.vc.type, org.dataspacex.vc.type");
 
         IdentityHubExtension extension = new IdentityHubExtension();
@@ -53,7 +53,7 @@ class IdentityHubExtensionTest {
 
     @Test
     void initialize_failsWhenAliasesAreBlank(ServiceExtensionContext context) {
-        when(context.getSetting(eq(IdentityHubExtension.TX_SCOPE_ALIASES), eq(TxScopeToCriterionTransformer.DEFAULT_ALIAS_LITERAL)))
+        when(context.getSetting(eq(IdentityHubExtension.TX_SCOPE_ALIASES), eq(TxScopeToCriterionTransformer.DEFAULT_ALIASES)))
                 .thenReturn(" , ");
 
         IdentityHubExtension extension = new IdentityHubExtension();

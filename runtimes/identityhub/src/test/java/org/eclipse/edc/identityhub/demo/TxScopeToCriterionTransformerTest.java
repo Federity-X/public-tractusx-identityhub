@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +43,19 @@ class TxScopeToCriterionTransformerTest {
 
         assertTrue(result.succeeded());
         assertNotNull(result.getContent());
+        assertEquals(1, result.getContent().size());
+        var criterion = result.getContent().get(0);
+        assertEquals(TxScopeToCriterionTransformer.TYPE_OPERAND, criterion.getOperandLeft());
+        assertEquals(TxScopeToCriterionTransformer.CONTAINS_OPERATOR, criterion.getOperator());
+        assertEquals("MembershipCredential", criterion.getOperandRight());
+    }
+
+    @Test
+    void transform_acceptsBothDefaultAliases() {
+        ScopeToCriterionTransformer transformer = new TxScopeToCriterionTransformer();
+
+        assertTrue(transformer.transformScope("org.eclipse.tractusx.vc.type:MembershipCredential:read").succeeded());
+        assertTrue(transformer.transformScope("org.eclipse.dspace.dcp.vc.type:MembershipCredential:read").succeeded());
     }
 
     @Test
