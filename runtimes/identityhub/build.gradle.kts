@@ -38,6 +38,7 @@ dependencies {
     runtimeOnly(project(":extensions:seed:super-user"))
     runtimeOnly(project(":extensions:identityhub:initial-participant"))
     runtimeOnly(project(":extensions:monitor:colored-jdk-monitor"))
+    runtimeOnly(project(":extensions:portal-credential-callback"))
 
     // used for custom extensions
     implementation(libs.edc.core.connector)
