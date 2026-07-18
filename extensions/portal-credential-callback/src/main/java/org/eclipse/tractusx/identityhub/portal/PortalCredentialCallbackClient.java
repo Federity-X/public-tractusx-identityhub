@@ -37,9 +37,12 @@ import java.util.Objects;
 
 /**
  * Posts the Portal's BPN-keyed issuer credential callback, authenticating with an OAuth2
- * client-credentials token (cached until shortly before expiry). Failures that the Portal treats as
- * safe duplicate/late rejections (4xx) are logged and swallowed so the caller does not retry
- * forever; transient failures (5xx / auth) are raised so the next scan retries.
+ * client-credentials token (cached until shortly before expiry). Responses that mean the Portal has
+ * nothing to advance — 404 (no SUBMITTED application for this BPN), 409 (the AWAIT step already
+ * advanced), 410 (gone) — are treated as delivered and NOT retried. Auth failures (401 — the cached
+ * token is dropped and re-minted next attempt — and 403), any other 4xx, and 5xx are RAISED so the
+ * periodic scan retries and the failure stays visible in the log; they are never silently swallowed
+ * (a swallowed auth failure would hang the Portal's AWAIT_*_CREDENTIAL_RESPONSE step forever).
  */
 public class PortalCredentialCallbackClient {
 
@@ -91,14 +94,31 @@ public class PortalCredentialCallbackClient {
         if (code >= 200 && code < 300) {
             return;
         }
-        if (code >= 400 && code < 500) {
-            // e.g. application no longer SUBMITTED, or the AWAIT step already advanced (duplicate).
-            // Safe to treat as delivered — do not retry.
-            monitor.info("Portal callback %s for bpn=%s returned %d (treating as already-handled): %s"
+        // The Portal has nothing to advance for this BPN — safe to treat as delivered, do not retry:
+        //   404 = no SUBMITTED application for this BPN (a seeded participant, or one already fully processed)
+        //   409 = the AWAIT step already advanced (duplicate delivery, e.g. after an IdentityHub restart)
+        //   410 = gone
+        if (code == 404 || code == 409 || code == 410) {
+            monitor.info("Portal callback %s for bpn=%s returned %d (nothing to advance — treating as delivered): %s"
                     .formatted(pathSuffix, bpn, code, response.body()));
             return;
         }
+        // Everything else must NOT be swallowed — that would silently hang AWAIT_*_CREDENTIAL_RESPONSE.
+        //   401 = the cached token is stale/rejected (e.g. centralidp re-seeded within the token TTL) → drop it
+        //         so the next attempt re-mints; the scan retries.
+        //   403 = the callback client lacks update_application_{bpn,membership}_credential (wrong service account).
+        //   other 4xx / 5xx = raise + log so the failure is visible; the scan retries.
+        if (code == 401) {
+            invalidateToken();
+        }
+        monitor.warning("Portal callback %s for bpn=%s returned %d — will retry on the next scan: %s"
+                .formatted(pathSuffix, bpn, code, response.body()));
         throw new EdcException("Portal callback %s failed with status %d: %s".formatted(pathSuffix, code, response.body()));
+    }
+
+    private synchronized void invalidateToken() {
+        cachedToken = null;
+        tokenExpiry = Instant.MIN;
     }
 
     private synchronized String getToken() {

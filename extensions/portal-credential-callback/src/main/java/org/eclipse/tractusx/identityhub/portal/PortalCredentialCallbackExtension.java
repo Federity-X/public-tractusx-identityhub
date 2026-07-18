@@ -29,11 +29,13 @@ import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.system.ServiceExtension;
 import org.eclipse.edc.spi.system.ServiceExtensionContext;
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Bridges the holder-pull IssuerService credential flow to the Portal's push-callback issuance
@@ -45,7 +47,9 @@ import java.util.concurrent.TimeUnit;
  * <p>Topology-agnostic: it simply reacts to whatever holder requests live in its own runtime — the
  * single shared multi-tenant IdentityHub or a per-participant one. Correlation is by BPN, recovered
  * from the holder {@code participantContextId} (the Portal-managed onboarding wallet uses the
- * lowercased BPN as the participant context id — see IdentityHubService).
+ * lowercased BPN as the participant context id — see IdentityHubService). Requests whose context id
+ * is not a bare BPN (e.g. seeded {@code role-bpn} participants) are skipped — they have no Portal
+ * onboarding application to advance.
  *
  * <p>Inert unless {@code tx.portal.callback.base.url} is set, so it is safe to always include in the
  * runtime and only activates where the Portal onboarding integration is configured.
@@ -55,9 +59,10 @@ import java.util.concurrent.TimeUnit;
  * (uppercase, {@code _} -> {@code .}). Hyphenated keys are NOT reachable from an env var.
  *
  * <p>Deduplication is in-memory per (holderPid, terminal-state) for the runtime lifetime. After a
- * restart a completed request may be re-posted once; the Portal callback safely rejects duplicates
- * (the application is no longer SUBMITTED / the AWAIT step already advanced), so this is bounded and
- * harmless. A persistent notified-marker is a future hardening if that log noise ever matters.
+ * restart a completed request may be re-posted once; the Portal callback returns 404 (no SUBMITTED
+ * application) / 409 (the AWAIT step already advanced) for such duplicates, which the client treats
+ * as delivered, so this is bounded and harmless. A persistent notified-marker + a state-filtered
+ * query are future hardening for large participant counts (see the BE-293 production-hardening notes).
  */
 public class PortalCredentialCallbackExtension implements ServiceExtension {
 
@@ -84,6 +89,12 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
     private static final String STATE_ERROR = "ERROR";
     private static final String STATUS_SUCCESSFUL = "SUCCESSFUL";
     private static final String STATUS_UNSUCCESSFUL = "UNSUCCESSFUL";
+    // A Portal-onboarded holder wallet uses the lowercased BPN(L) as its participantContextId
+    // (IdentityHubService.CreateHolderWalletAsync -> bpn.ToLowerInvariant()), i.e. "bpnl" + 12 chars.
+    // Seeded participants use a "role-bpn" id (e.g. "provider-bpnl00000003ayre"), which must NOT be
+    // reported to the Portal (there is no onboarding application for them). Gate on this pattern so
+    // the BPN we recover is a real BPN and seeded contexts are skipped by construction.
+    private static final Pattern ONBOARDED_BPN = Pattern.compile("^bpnl[a-z0-9]{12}$");
 
     @Inject
     private HolderCredentialRequestStore store;
@@ -144,16 +155,25 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
     private void scanSafely() {
         try {
             scan();
-        } catch (Exception e) {
-            monitor.warning("Portal credential-callback scan failed: " + e.getMessage(), e);
+        } catch (Throwable t) {
+            // Catch Throwable, not just Exception: an Error escaping this method would make
+            // scheduleWithFixedDelay cancel the periodic task PERMANENTLY and silently (callbacks stop
+            // with no further log). Log loudly and stay scheduled so the next tick retries.
+            monitor.severe("Portal credential-callback scan failed (task stays scheduled): " + t.getMessage(), t);
         }
     }
 
     private void scan() {
+        // NOTE (scale): QuerySpec.max() loads the whole store and terminal-filters client-side. Fine at
+        // sandbox scale; for many participants, switch to a state-filtered query + a persisted notified
+        // watermark (see the "Production hardening" notes in BE-293-cross-repo-changes-and-decisions.md).
         for (var request : store.query(QuerySpec.max())) {
             var state = request.stateAsString();
             if (!STATE_ISSUED.equals(state) && !STATE_ERROR.equals(state)) {
                 continue;
+            }
+            if (!ONBOARDED_BPN.matcher(request.getParticipantContextId()).matches()) {
+                continue; // seeded/role participant context — not a Portal-onboarded BPN wallet
             }
             var dedupKey = request.getHolderPid() + "|" + state;
             if (!notified.add(dedupKey)) {
@@ -169,7 +189,9 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
     }
 
     private void deliver(HolderCredentialRequest request, String state) {
-        var bpn = request.getParticipantContextId().toUpperCase();
+        // participantContextId is the lowercased BPN (guarded by ONBOARDED_BPN in scan()); Locale.ROOT
+        // so a JVM default locale (e.g. Turkish) cannot corrupt the upper-casing of an ASCII BPN.
+        var bpn = request.getParticipantContextId().toUpperCase(Locale.ROOT);
         var status = STATE_ISSUED.equals(state) ? STATUS_SUCCESSFUL : STATUS_UNSUCCESSFUL;
         for (var requested : request.getIdsAndFormats()) {
             var type = requested.credentialType();
