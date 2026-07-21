@@ -1,4 +1,5 @@
 /*
+ *   Copyright (c) 2026 Technovative Solutions
  *   Copyright (c) 2026 Contributors to the Eclipse Foundation
  *
  *   See the NOTICE file(s) distributed with this work for additional
@@ -125,10 +126,10 @@ public class PortalCredentialCallbackClient {
         if (cachedToken != null && Instant.now().isBefore(tokenExpiry)) {
             return cachedToken;
         }
-        var form = "grant_type=client_credentials"
-                + "&client_id=" + enc(clientId)
-                + "&client_secret=" + enc(clientSecret)
-                + "&scope=" + enc(scope);
+        var form = "grant_type=client_credentials" +
+                "&client_id=" + enc(clientId) +
+                "&client_secret=" + enc(clientSecret) +
+                "&scope=" + enc(scope);
         var request = HttpRequest.newBuilder(URI.create(tokenUrl))
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/x-www-form-urlencoded")

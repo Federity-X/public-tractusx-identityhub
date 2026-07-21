@@ -1,4 +1,5 @@
 /*
+ *   Copyright (c) 2026 Technovative Solutions
  *   Copyright (c) 2026 Contributors to the Eclipse Foundation
  *
  *   See the NOTICE file(s) distributed with this work for additional
@@ -62,7 +63,7 @@ import java.util.regex.Pattern;
  * restart a completed request may be re-posted once; the Portal callback returns 404 (no SUBMITTED
  * application) / 409 (the AWAIT step already advanced) for such duplicates, which the client treats
  * as delivered, so this is bounded and harmless. A persistent notified-marker + a state-filtered
- * query are future hardening for large participant counts (see the BE-293 production-hardening notes).
+ * query are future hardening for large participant counts (see README.md, "Scale &amp; restart").
  */
 public class PortalCredentialCallbackExtension implements ServiceExtension {
 
@@ -94,7 +95,7 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
     // Seeded participants use a "role-bpn" id (e.g. "provider-bpnl00000003ayre"), which must NOT be
     // reported to the Portal (there is no onboarding application for them). Gate on this pattern so
     // the BPN we recover is a real BPN and seeded contexts are skipped by construction.
-    private static final Pattern ONBOARDED_BPN = Pattern.compile("^bpnl[a-z0-9]{12}$");
+    static final Pattern ONBOARDED_BPN = Pattern.compile("^bpnl[a-z0-9]{12}$");
 
     @Inject
     private HolderCredentialRequestStore store;
@@ -120,6 +121,12 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
         bpnCredentialType = context.getSetting(BPN_CREDENTIAL_TYPE, "BpnCredential");
         membershipCredentialType = context.getSetting(MEMBERSHIP_CREDENTIAL_TYPE, "MembershipCredential");
         intervalSeconds = context.getSetting(INTERVAL_SECONDS, 10);
+        if (intervalSeconds <= 0) {
+            // A non-positive delay would make scheduleWithFixedDelay throw IllegalArgumentException in
+            // start(), aborting the whole runtime boot. A bad interval must not take the runtime down.
+            monitor.warning("%s: %s=%d is invalid; falling back to the default 10s".formatted(NAME, INTERVAL_SECONDS, intervalSeconds));
+            intervalSeconds = 10;
+        }
 
         var baseUrl = context.getSetting(PORTAL_BASE_URL, null);
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -166,49 +173,82 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
     private void scan() {
         // NOTE (scale): QuerySpec.max() loads the whole store and terminal-filters client-side. Fine at
         // sandbox scale; for many participants, switch to a state-filtered query + a persisted notified
-        // watermark (see the "Production hardening" notes in BE-293-cross-repo-changes-and-decisions.md).
+        // watermark (see README.md, "Scale & restart").
         for (var request : store.query(QuerySpec.max())) {
-            var state = request.stateAsString();
-            if (!STATE_ISSUED.equals(state) && !STATE_ERROR.equals(state)) {
-                continue;
-            }
-            if (!ONBOARDED_BPN.matcher(request.getParticipantContextId()).matches()) {
-                continue; // seeded/role participant context — not a Portal-onboarded BPN wallet
-            }
-            var dedupKey = request.getHolderPid() + "|" + state;
-            if (!notified.add(dedupKey)) {
-                continue;
-            }
             try {
-                deliver(request, state);
+                process(request);
             } catch (Exception e) {
-                notified.remove(dedupKey); // allow a retry on the next scan
-                monitor.warning("Failed to deliver Portal callback for holderPid %s: %s".formatted(request.getHolderPid(), e.getMessage()), e);
+                // Per-request isolation: a single malformed record (e.g. an out-of-range state code that
+                // makes stateAsString() throw) must not abort the whole tick and starve every other
+                // request. Skip this one; the next tick re-evaluates the rest of the store.
+                monitor.warning("Skipping holder request %s in Portal callback scan: %s".formatted(request.getHolderPid(), e.getMessage()), e);
             }
         }
     }
 
-    private void deliver(HolderCredentialRequest request, String state) {
-        // participantContextId is the lowercased BPN (guarded by ONBOARDED_BPN in scan()); Locale.ROOT
+    private void process(HolderCredentialRequest request) {
+        var state = request.stateAsString();
+        if (!STATE_ISSUED.equals(state) && !STATE_ERROR.equals(state)) {
+            return;
+        }
+        var participantContextId = request.getParticipantContextId();
+        if (participantContextId == null || !ONBOARDED_BPN.matcher(participantContextId).matches()) {
+            // seeded/role participant context (e.g. "provider-bpnl…") — no Portal onboarding application
+            // to advance. Logged at debug so "why didn't my callback fire?" is diagnosable.
+            monitor.debug("Skipping holder request %s: participantContextId '%s' is not a Portal-onboarded BPN wallet".formatted(request.getHolderPid(), participantContextId));
+            return;
+        }
+        deliver(request, state, participantContextId);
+    }
+
+    private void deliver(HolderCredentialRequest request, String state, String participantContextId) {
+        // participantContextId is the lowercased BPN (guarded by ONBOARDED_BPN in process()); Locale.ROOT
         // so a JVM default locale (e.g. Turkish) cannot corrupt the upper-casing of an ASCII BPN.
-        var bpn = request.getParticipantContextId().toUpperCase(Locale.ROOT);
+        var bpn = participantContextId.toUpperCase(Locale.ROOT);
         var status = STATE_ISSUED.equals(state) ? STATUS_SUCCESSFUL : STATUS_UNSUCCESSFUL;
         for (var requested : request.getIdsAndFormats()) {
             var type = requested.credentialType();
-            String pathSuffix;
-            if (type.equals(bpnCredentialType)) {
-                pathSuffix = "bpncredential";
-            } else if (type.equals(membershipCredentialType)) {
-                pathSuffix = "membershipcredential";
-            } else {
+            var pathSuffix = pathSuffixFor(type, bpnCredentialType, membershipCredentialType);
+            if (pathSuffix == null) {
                 monitor.debug("Ignoring credential type %s (not a Portal onboarding credential)".formatted(type));
+                continue;
+            }
+            // Dedup per (holderPid, state, type): a per-type key means a callback that already succeeded
+            // is never re-POSTed just because a SIBLING type in the same request failed. Removed only on
+            // failure, so the next scan retries just the failed type.
+            var dedupKey = request.getHolderPid() + "|" + state + "|" + type;
+            if (!notified.add(dedupKey)) {
                 continue;
             }
             var message = STATE_ISSUED.equals(state)
                     ? "Credential %s issued via IdentityHub".formatted(type)
-                    : "Credential %s failed to issue via IdentityHub".formatted(type);
-            client.postCallback(pathSuffix, bpn, status, message);
-            monitor.info("Delivered Portal callback: bpn=%s type=%s status=%s".formatted(bpn, type, status));
+                    : errorMessage(request, type);
+            try {
+                client.postCallback(pathSuffix, bpn, status, message);
+                monitor.info("Delivered Portal callback: bpn=%s type=%s status=%s".formatted(bpn, type, status));
+            } catch (Exception e) {
+                notified.remove(dedupKey); // isolate the failed type; retry only it on the next scan
+                monitor.warning("Failed to deliver Portal callback for bpn=%s type=%s: %s".formatted(bpn, type, e.getMessage()), e);
+            }
         }
+    }
+
+    private static String errorMessage(HolderCredentialRequest request, String type) {
+        var detail = request.getErrorDetail();
+        return detail == null || detail.isBlank()
+                ? "Credential %s failed to issue via IdentityHub".formatted(type)
+                : "Credential %s failed to issue via IdentityHub: %s".formatted(type, detail);
+    }
+
+    // Maps a requested VC type to the Portal issuer callback path suffix, or null if it is not a Portal
+    // onboarding credential. Package-private + static for unit testing.
+    static String pathSuffixFor(String credentialType, String bpnType, String membershipType) {
+        if (credentialType.equals(bpnType)) {
+            return "bpncredential";
+        }
+        if (credentialType.equals(membershipType)) {
+            return "membershipcredential";
+        }
+        return null;
     }
 }
