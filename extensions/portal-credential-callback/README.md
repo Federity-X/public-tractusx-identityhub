@@ -46,6 +46,15 @@ All keys are dot-separated (EDC convention) so they are also settable via enviro
 The callback client must hold the Portal roles `update_application_bpn_credential` +
 `update_application_membership_credential`, or the callback is rejected `403`.
 
+> **Cross-repo contract — keep the credential-type strings in sync.** `pathSuffixFor` matches the
+> requested VC type against `tx.portal.callback.{bpn,membership}.credential.type` with an exact
+> `.equals`; a type that matches neither is silently skipped and the Portal's `AWAIT_*_CREDENTIAL_RESPONSE`
+> step never completes. These strings must equal, on all three sides:
+> the VC `type` actually issued, the portal-backend `ApplicationChecklist:IdentityHub:{Bpn,Membership}CredentialType`,
+> and these two settings. They share the defaults `BpnCredential` / `MembershipCredential`; if a deployment
+> overrides one it must override all three (drive them from one umbrella value). Correlation also relies on
+> the Portal-managed wallet using the lowercased BPN as its `participantContextId` (see `ONBOARDED_BPN`).
+
 ## Scope: local deployment vs. production
 
 This extension was built and validated for **local / sandbox deployment** (Docker Compose, the umbrella
