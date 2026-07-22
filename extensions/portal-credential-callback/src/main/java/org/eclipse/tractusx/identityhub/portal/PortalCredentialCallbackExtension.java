@@ -101,14 +101,30 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
     private HolderCredentialRequestStore store;
 
     private Monitor monitor;
-    private PortalCredentialCallbackClient client;
+    private PortalCallback client;
     private String bpnCredentialType;
     private String membershipCredentialType;
     private int intervalSeconds;
     private ScheduledExecutorService scheduler;
 
-    // holderPid|state already delivered this runtime lifetime
+    // holderPid|state|type already delivered this runtime lifetime
     private final Set<String> notified = ConcurrentHashMap.newKeySet();
+    // credential types already WARN-logged as unmapped — so a type/config drift is greppable once, not a per-tick flood
+    private final Set<String> warnedUnmappedTypes = ConcurrentHashMap.newKeySet();
+
+    public PortalCredentialCallbackExtension() {
+    }
+
+    // Package-private seam: lets a unit test drive scanOnce() with a fake PortalCallback and a stubbed
+    // HolderCredentialRequestStore, without an HTTP endpoint or the EDC dependency-injection harness.
+    PortalCredentialCallbackExtension(HolderCredentialRequestStore store, PortalCallback client,
+                                      String bpnCredentialType, String membershipCredentialType, Monitor monitor) {
+        this.store = store;
+        this.client = client;
+        this.bpnCredentialType = bpnCredentialType;
+        this.membershipCredentialType = membershipCredentialType;
+        this.monitor = monitor;
+    }
 
     @Override
     public String name() {
@@ -161,7 +177,7 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
 
     private void scanSafely() {
         try {
-            scan();
+            scanOnce();
         } catch (Throwable t) {
             // Catch Throwable, not just Exception: an Error escaping this method would make
             // scheduleWithFixedDelay cancel the periodic task PERMANENTLY and silently (callbacks stop
@@ -170,7 +186,8 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
         }
     }
 
-    private void scan() {
+    // Package-private (not private) so a unit test can drive exactly one scan tick deterministically.
+    void scanOnce() {
         // NOTE (scale): QuerySpec.max() loads the whole store and terminal-filters client-side. Fine at
         // sandbox scale; for many participants, switch to a state-filtered query + a persisted notified
         // watermark (see README.md, "Scale & restart").
@@ -210,7 +227,14 @@ public class PortalCredentialCallbackExtension implements ServiceExtension {
             var type = requested.credentialType();
             var pathSuffix = pathSuffixFor(type, bpnCredentialType, membershipCredentialType);
             if (pathSuffix == null) {
-                monitor.debug("Ignoring credential type %s (not a Portal onboarding credential)".formatted(type));
+                // The requested VC type matches neither configured onboarding type, so nothing is delivered
+                // and the Portal's AWAIT_*_CREDENTIAL_RESPONSE step hangs with no error on either side — the
+                // worst failure mode of this integration. WARN once per distinct type (not once per tick) so a
+                // credential-type config drift is a one-line grep instead of an invisible stuck onboarding.
+                if (warnedUnmappedTypes.add(type)) {
+                    monitor.warning("Portal callback: no endpoint for credential type '%s' (configured bpn='%s', membership='%s'); skipping — the Portal onboarding step will not advance for this type"
+                            .formatted(type, bpnCredentialType, membershipCredentialType));
+                }
                 continue;
             }
             // Dedup per (holderPid, state, type): a per-type key means a callback that already succeeded

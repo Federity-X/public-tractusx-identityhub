@@ -45,7 +45,7 @@ import java.util.Objects;
  * periodic scan retries and the failure stays visible in the log; they are never silently swallowed
  * (a swallowed auth failure would hang the Portal's AWAIT_*_CREDENTIAL_RESPONSE step forever).
  */
-public class PortalCredentialCallbackClient {
+public class PortalCredentialCallbackClient implements PortalCallback {
 
     public static final String DEFAULT_SCOPE = "openid";
     private static final String CALLBACK_PATH = "/api/administration/registration/issuer/";
@@ -80,6 +80,7 @@ public class PortalCredentialCallbackClient {
         this.monitor = monitor;
     }
 
+    @Override
     public void postCallback(String pathSuffix, String bpn, String status, String message) {
         var url = baseUrl + CALLBACK_PATH + pathSuffix;
         var body = serialize(Map.of("bpn", bpn, "status", status, "message", message == null ? "" : message));

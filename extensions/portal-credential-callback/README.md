@@ -27,6 +27,10 @@ Correlation is by BPN, recovered from the holder `participantContextId` (the Por
 wallet uses the lowercased BPN as the participant-context id). Requests whose context id is not a bare
 BPN (e.g. seeded `role-bpn` participants) are skipped — they have no Portal onboarding application.
 
+The Portal endpoints are **BPN-keyed, not application-keyed**: the callback carries only the BPN, and the
+Portal resolves it to the single `SUBMITTED` application for that BPN. If a BPN somehow has two, the
+Portal returns `409` and the callback is dropped.
+
 Deduplication is in-memory per `(holderPid, terminal-state, credentialType)` for the runtime lifetime.
 
 ## Configuration
@@ -46,9 +50,18 @@ All keys are dot-separated (EDC convention) so they are also settable via enviro
 The callback client must hold the Portal roles `update_application_bpn_credential` +
 `update_application_membership_credential`, or the callback is rejected `403`.
 
+> **Use the seeded `sa-cl24-01` client — do not mint a new one.** The Portal seed
+> (`Seeder/Data/technical_users.json`) already ships `sa-cl24-01` (*"Technical User for the Connection
+> between the SSI Credential Issuer and the Portal"*) holding exactly those two roles and no more. Point
+> `tx.portal.callback.client.id` at it (`sa-cl24-01`) to keep the least privilege the seed defines and
+> avoid a second credential to rotate. This is deliberately **not** a code default: the value is specific
+> to the Portal's seed, and silently defaulting a generic extension to it would mislead a differently
+> seeded deployment.
+
 > **Cross-repo contract — keep the credential-type strings in sync.** `pathSuffixFor` matches the
 > requested VC type against `tx.portal.callback.{bpn,membership}.credential.type` with an exact
-> `.equals`; a type that matches neither is silently skipped and the Portal's `AWAIT_*_CREDENTIAL_RESPONSE`
+> `.equals`; a type that matches neither is skipped (logged once per distinct type at `WARN`:
+> `Portal callback: no endpoint for credential type '…'`) and the Portal's `AWAIT_*_CREDENTIAL_RESPONSE`
 > step never completes. These strings must equal, on all three sides:
 > the VC `type` actually issued, the portal-backend `ApplicationChecklist:IdentityHub:{Bpn,Membership}CredentialType`,
 > and these two settings. They share the defaults `BpnCredential` / `MembershipCredential`; if a deployment
@@ -92,15 +105,21 @@ this is used in a production dataspace.
   every rolling upgrade replays the retained terminal-state store to the Portal (absorbed by the
   Portal's `404`/`409`, but wasteful). Production should persist a per-request `portal-notified` marker
   (a column / side table) so dedup survives restarts and stays bounded.
-- **Horizontal scaling.** In-memory dedup + a per-replica scan loop means `replicaCount > 1` makes every
-  replica scan and deliver independently. Production needs a single-writer / leader election or a
-  persisted marker before scaling out.
+- **Horizontal scaling — run exactly one replica.** In-memory dedup + a per-replica scan loop means
+  `replicaCount > 1` makes every replica scan and deliver independently. The Portal absorbs the duplicates
+  (`409`), so this is a load/noise problem rather than a correctness one — but it is invisible from the
+  Portal side, so **keep `replicaCount: 1`** until single-writer / leader election or a persisted marker
+  exists.
 
 ### Semantics
 
-- **`ERROR` → `UNSUCCESSFUL`.** A terminal `ERROR` is reported to the Portal as a permanent onboarding
-  failure. Confirm this matches the desired onboarding semantics (vs. only reporting once
-  IdentityHub-side retries are exhausted).
+- **`ERROR` → `UNSUCCESSFUL` → recoverable `FAILED`.** A terminal `ERROR` is reported to the Portal as a
+  permanent onboarding failure, which the Portal turns into a `FAILED` checklist entry. Confirm this
+  matches the desired onboarding semantics (vs. only reporting once IdentityHub-side retries are
+  exhausted). An operator seeing `BPNL_CREDENTIAL: FAILED` should read it as *the IssuerService gave up* —
+  recovery is **Portal-side**, via
+  `POST /api/administration/registration/application/{applicationId}/retrigger-{bpn,membership}-credential`,
+  not anything on the IdentityHub.
 
 ## Upstreaming
 
