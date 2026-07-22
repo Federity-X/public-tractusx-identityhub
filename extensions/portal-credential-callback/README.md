@@ -113,13 +113,25 @@ this is used in a production dataspace.
 
 ### Semantics
 
-- **`ERROR` → `UNSUCCESSFUL` → recoverable `FAILED`.** A terminal `ERROR` is reported to the Portal as a
-  permanent onboarding failure, which the Portal turns into a `FAILED` checklist entry. Confirm this
-  matches the desired onboarding semantics (vs. only reporting once IdentityHub-side retries are
-  exhausted). An operator seeing `BPNL_CREDENTIAL: FAILED` should read it as *the IssuerService gave up* —
-  recovery is **Portal-side**, via
-  `POST /api/administration/registration/application/{applicationId}/retrigger-{bpn,membership}-credential`,
-  not anything on the IdentityHub.
+- **`ERROR` → `UNSUCCESSFUL`, reported immediately — and that is correct.** A holder request reaches
+  `ERROR` only from the initial DCP send (`CREATED`/`REQUESTING`), on the first hard failure, as a
+  non-retryable terminal state (EDC `CredentialRequestManagerImpl`): the holder never retries out of
+  `ERROR`, and genuinely in-flight requests sit in `REQUESTED`, which this extension ignores. So a
+  terminal `ERROR` already means "the holder has genuinely given up", and reporting it straight through
+  as `UNSUCCESSFUL` is the intended behaviour — confirmed with the portal-backend, which does **not** want
+  an intermediate "still retrying" signal (`AWAIT_*_CREDENTIAL_RESPONSE` is itself the waiting state).
+- **The complementary case — the issuer never delivers — is bounded Portal-side, not here.** An
+  issuer-side give-up is invisible to the holder: the request just stays in `REQUESTED` (the only inbound
+  transition, `CredentialWriterImpl`, sets `ISSUED` on success; there is no inbound `ERROR` path and no
+  holder-side `REQUESTED` timeout), so this extension fires nothing. That "callback never comes" case is
+  bounded by the **Portal's** own wait deadline (`IdentityHub:MaxCredentialWaitTimeInDays`, default
+  1 day), which fails the step and schedules a retrigger. The holder emits `ERROR` within seconds/minutes
+  or not at all, so this deadline never races a late holder callback; if a deployment's *legitimate*
+  issuance (e.g. long attestation) could exceed the Portal deadline, raise `MaxCredentialWaitTimeInDays`.
+- **Operator recovery.** Whether a `FAILED` checklist entry came from an `UNSUCCESSFUL` callback or the
+  Portal wait deadline, recovery is **Portal-side**, via
+  `POST /api/administration/registration/application/{applicationId}/retrigger-{bpn,membership}-credential`
+  — nothing on the IdentityHub.
 
 ## Upstreaming
 
